@@ -34,6 +34,8 @@ async function deleteMessagesInChannel(channel) {
     if (!messages.size) break;
 
     for (const message of messages.values()) {
+      if (message.author.bot) continue;
+
       try {
         await message.delete();
         deletedCount++;
