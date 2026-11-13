@@ -128,7 +128,9 @@ npm run setup-panels
 Perintah tersebut memasang embed rules pada channel `1570116401333539038` dan mengatur
 permission category `1570115603119734834`: member dapat melihat riwayat serta memberi reaction,
 tetapi tidak dapat mengirim pesan. Channel `1570116755261759600` menjadi pengecualian agar
-semua member dapat mengirim laporan akun yang ter-hack.
+semua member dapat mengirim laporan akun yang ter-hack. Setiap auto-ban dicatat lengkap
+(nama, avatar, ID, waktu pembuatan akun, isi pesan, lampiran, dan tautan pesan) pada channel
+log `1570120342502899742`.
 
 ---
 
