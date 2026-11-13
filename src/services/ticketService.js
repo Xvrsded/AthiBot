@@ -4,8 +4,7 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,
-  AttachmentBuilder
+  ButtonStyle
 } = require('discord.js');
 const path = require('path');
 const Ticket = require('../models/Ticket');
@@ -448,34 +447,6 @@ class TicketService {
     const resolvedTotalPrice = totalPrice !== '-' ? totalPrice : ticket.orderPrice || 'Detail tidak tersedia';
     const resolvedPaymentMethod = paymentMethod !== '-' ? paymentMethod : ticket.paymentMethod || '-';
 
-    // Ambil riwayat percakapan (transkrip chat)
-    let transcriptText = `=== TRANSKRIP TIKET ATHI STORE ===\n`;
-    transcriptText += `ID Tiket      : ${ticket.ticketId}\n`;
-    transcriptText += `Kategori      : ${ticket.category}\n`;
-    transcriptText += `Customer      : ${ticket.userTag} (${ticket.userId})\n`;
-    transcriptText += `Staff Handle  : ${ticket.claimedByName || user.tag}\n`;
-    transcriptText += `Status Akhir  : ${isSuccess ? 'SUCCESS (Transaksi Berhasil)' : 'CLOSED (Batal/Selesai Biasa)'}\n`;
-    if (isSuccess) {
-        transcriptText += `Paket/Nominal : ${resolvedNominal}\n`;
-        transcriptText += `Total Bayar   : ${resolvedTotalPrice}\n`;
-        transcriptText += `Metode Bayar  : ${resolvedPaymentMethod}\n`;
-    }
-    transcriptText += `Ditutup Oleh  : ${user.tag} (${user.id})\n`;
-    transcriptText += `Waktu         : ${new Date().toISOString()}\n`;
-    transcriptText += `Catatan       : ${reason}\n`;
-    transcriptText += `==================================\n\n`;
-
-    try {
-      const messages = await channel.messages.fetch({ limit: 100 });
-      const sortedMessages = Array.from(messages.values()).reverse();
-      for (const msg of sortedMessages) {
-        const time = msg.createdAt.toLocaleString('id-ID');
-        transcriptText += `[${time}] ${msg.author.tag}: ${msg.cleanContent || '[Attachment/Embed]'}\n`;
-      }
-    } catch (e) {
-      transcriptText += `[Gagal mengambil sebagian pesan: ${e.message}]\n`;
-    }
-
     // Update database
     ticket.status = 'CLOSED';
     ticket.isSuccess = isSuccess;
@@ -487,11 +458,6 @@ class TicketService {
     ticket.closeReason = reason;
     ticket.closedAt = new Date();
     await ticket.save();
-
-    const transcriptBuffer = Buffer.from(transcriptText, 'utf-8');
-    const transcriptAttachment = new AttachmentBuilder(transcriptBuffer, {
-      name: `transcript-${ticket.ticketId}.txt`
-    });
 
     // PENTING: Jika TRANSAKSI SUKSES, kirim ke channel log-transaksi (1570118698654629958)
     const transactionLogChannelId = process.env.TRANSACTION_LOG_CHANNEL_ID || '1570118698654629958';
@@ -534,7 +500,7 @@ class TicketService {
           .setFooter({ text: 'Athi Store • Transaction Log', iconURL: guild.iconURL() || undefined })
           .setTimestamp();
 
-        await txChannel.send({ embeds: [txEmbed], files: [transcriptAttachment] }).catch((e) => {
+        await txChannel.send({ embeds: [txEmbed] }).catch((e) => {
           console.error('❌ Gagal mengirim log transaksi:', e.message);
         });
       }

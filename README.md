@@ -1,6 +1,6 @@
 # 🍑 Athibot - Discord Bot Resmi Athi Store
 
-**Athibot** adalah bot Discord modern dan profesional yang dirancang khusus untuk operasional **Athi Store**. Dibangun menggunakan **Node.js 18+**, **discord.js v14**, dan **MongoDB (Mongoose)**, bot ini menyediakan otomatisasi pemesanan Robux, sistem tiket interaktif dengan transkrip chat, manajemen katalog produk, serta fitur utilitas komunitas.
+**Athibot** adalah bot Discord modern dan profesional yang dirancang khusus untuk operasional **Athi Store**. Dibangun menggunakan **Node.js 18+**, **discord.js v14**, dan **MongoDB (Mongoose)**, bot ini menyediakan otomatisasi pemesanan Robux, sistem tiket interaktif, log transaksi berbasis embed, manajemen katalog produk, serta fitur utilitas komunitas.
 
 ---
 
@@ -14,7 +14,7 @@
   - ⚠️ **Lapor Kendala** — Penyelesaian masalah pesanan / komplain.
 - Saluran channel privat otomatis antara pembeli dan tim staff.
 - Fitur **Klaim Tiket** (`Claim`) oleh staf untuk mencegah tumpang tindih penanganan.
-- Fitur **Tutup Tiket** (`Close`) dengan konfirmasi dan pembuatan berkas transkrip otomatis (`.txt`) yang dikirim ke channel log dan DM pengguna.
+- Fitur **Tutup Tiket** (`Close`) dengan konfirmasi dan pencatatan log transaksi berbasis embed.
 - Penyimpanan riwayat tiket di database MongoDB.
 
 ### 2. 🛒 Manajemen Toko & Pemesanan Robux (Shop & Orders)
@@ -85,7 +85,7 @@ Buka file `.env` menggunakan teks editor (VS Code, Nano, Notepad, dsb.) dan isi 
 | `EMBED_COLOR` | Warna HEX embed bot | Warna tema utama Athi Store (default: `#FF8474`). Bebas diubah sesuai selera. |
 | `STAFF_ROLE_ID` | Role staff/admin penanggung jawab | Klik kanan Role staff di server kamu ➜ Pilih **Copy Role ID** (opsional, bisa via `/config staff-role`). |
 | `TICKET_CATEGORY_ID` | Category tetap untuk seluruh channel tiket (`1570431160222228541`) | Semua jenis tiket dibuat otomatis di category ini. |
-| `LOG_CHANNEL_ID` | Channel log transkrip tiket | Klik kanan text channel log ➜ Pilih **Copy Channel ID** (opsional). |
+| `TRANSACTION_LOG_CHANNEL_ID` | Channel log transaksi berbasis embed | Klik kanan text channel log ➜ Pilih **Copy Channel ID**. |
 | `ORDER_LOG_CHANNEL_ID` | Channel notifikasi order staff | Klik kanan text channel untuk order staff ➜ Pilih **Copy Channel ID** (opsional, bisa via `/config order`). |
 
 > [!IMPORTANT]
@@ -210,7 +210,7 @@ athibot/
       │    ├── GuildConfig.js         # Pengaturan per server
       │    ├── Order.js               # Data transaksi pesanan
       │    ├── Product.js             # Data paket produk & harga
-      │    ├── Ticket.js              # Data tiket support & transkrip
+      │    ├── Ticket.js              # Data tiket support
       │    └── User.js                # Data profil & transaksi user
       ├── scripts/             # Script utilitas CLI
       │    ├── deployCommands.js      # Deploy slash commands ke Discord
@@ -218,7 +218,7 @@ athibot/
       └── services/            # Logika bisnis & integrasi
            ├── databaseService.js     # Manajemen koneksi & auto-reconnect MongoDB
            ├── storeService.js        # Logika toko, kalkulasi harga, & order
-           └── ticketService.js       # Logika tiket, klaim, & transkrip chat
+           └── ticketService.js       # Logika tiket, klaim, & log transaksi embed
 ```
 
 ---
