@@ -77,14 +77,13 @@ async function deleteServerMessages(guild) {
 function buildWarningEmbed() {
   return new EmbedBuilder()
     .setColor('#E74C3C')
-    .setTitle('🚫 PERINGATAN KEAMANAN')
+    .setTitle('⚠️ CHANNEL LAPOR AKUN TER-HACK')
     .setDescription(
-      'Channel ini **dilarang mengirim pesan**.\n\n' +
-      'Pesan dari user biasa akan dianggap sebagai indikasi akun bermasalah/hacked, ' +
-      'user akan langsung di-ban, dan pesan server akan dibersihkan.\n\n' +
-      'Jika terkena ban, silakan hubungi **Admin/Staff Athi Store** untuk proses unban manual.'
+      'Pesan dari member biasa di channel ini akan memicu prosedur keamanan otomatis. ' +
+      'Akun pengirim dapat langsung di-ban dan pesan server akan dibersihkan.\n\n' +
+      'Jika terkena ban, silakan hubungi Admin/Staff Athi Store untuk proses unban manual.'
     )
-    .setFooter({ text: 'Athi Store • Jangan mengirim pesan di channel ini' })
+    .setFooter({ text: 'Athi Store • Gunakan channel ini hanya untuk laporan keamanan' })
     .setTimestamp();
 }
 

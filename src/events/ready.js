@@ -38,28 +38,31 @@ module.exports = {
     if (protectedChannel?.isTextBased()) {
       try {
         const recentMessages = await protectedChannel.messages.fetch({ limit: 20 });
-        const hasWarning = recentMessages.some(
+        const warningMessage = recentMessages.find(
           (message) =>
             message.author.id === client.user.id &&
-            message.embeds[0]?.title === '🚫 PERINGATAN KEAMANAN'
+            message.embeds[0]?.title === '⚠️ CHANNEL LAPOR AKUN TER-HACK'
         );
 
-        if (!hasWarning) {
-          await protectedChannel.send({
-            embeds: [
-              {
-                color: 0xe74c3c,
-                title: '🚫 PERINGATAN KEAMANAN',
-                description:
-                  'Channel ini **dilarang mengirim pesan**.\n\n' +
-                  'Pesan dari user biasa akan dianggap sebagai indikasi akun bermasalah/hacked, ' +
-                  'user akan langsung di-ban, dan pesan server akan dibersihkan.\n\n' +
-                  'Jika terkena ban, silakan hubungi **Admin/Staff Athi Store** untuk proses unban manual.',
-                footer: { text: 'Athi Store • Jangan mengirim pesan di channel ini' },
-                timestamp: new Date().toISOString()
-              }
-            ]
-          });
+        const warningPayload = {
+          embeds: [
+            {
+              color: 0xe74c3c,
+              title: '⚠️ CHANNEL LAPOR AKUN TER-HACK',
+              description:
+                'Channel ini adalah pengecualian rules dan dapat digunakan untuk mengirim pesan laporan akun yang ter-hack.\n\n' +
+                '⚠️ Pesan dari member biasa akan memicu prosedur keamanan otomatis dan akun pengirim dapat langsung di-ban. ' +
+                'Jika terkena ban, silakan hubungi Admin/Staff Athi Store untuk proses unban manual.',
+              footer: { text: 'Athi Store • Gunakan channel ini hanya untuk laporan keamanan' },
+              timestamp: new Date().toISOString()
+            }
+          ]
+        };
+
+        if (warningMessage) {
+          await warningMessage.edit(warningPayload);
+        } else {
+          await protectedChannel.send(warningPayload);
         }
       } catch (error) {
         console.error('❌ Gagal memasang warning channel keamanan:', error.message);

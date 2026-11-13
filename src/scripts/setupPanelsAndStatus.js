@@ -14,6 +14,134 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
+const RULES_CATEGORY_ID = '1570115603119734834';
+const RULES_CHANNEL_ID = '1570116401333539038';
+const HACKED_ACCOUNT_CHANNEL_ID = '1570116755261759600';
+
+const rules = [
+  {
+    name: '1. Be kind to everyone',
+    value:
+      'Di sini kita semua setara. No drama, no sindir-sindiran, dan no bikin suasana jadi tidak enak. Mari jaga vibe server tetap positif.'
+  },
+  {
+    name: '2. Chat in the right channel',
+    value:
+      'Setiap channel dibuat untuk topik tertentu. Gunakan sesuai fungsinya agar server tetap rapi dan nyaman dilihat. No salah tempat dan no OOT berlebihan.'
+  },
+  {
+    name: '3. No promotion without permission',
+    value:
+      'Silakan izin dulu ke owner/staff. Kami selalu terbuka selama sesuai aturan. Tanpa izin, promosi akan kami hapus.'
+  },
+  {
+    name: '4. Keep it clean & safe',
+    value:
+      'No spam, no konten 18+, no hate speech, no ancaman, dan no kekerasan dalam bentuk apa pun. Server ini tempat yang aman untuk semua.'
+  },
+  {
+    name: '5. Talk to us in support',
+    value:
+      'Ada uneg-uneg, yang mengganggu, atau saran agar server makin bagus? Sampaikan langsung di support channel, jangan dibawa ke channel umum.'
+  },
+  {
+    name: '6. Watch your words',
+    value:
+      'Bebas berekspresi, tetapi tetap sopan. Hindari kata kasar, rasis, dan apa pun yang dapat menyakiti orang lain.'
+  },
+  {
+    name: '7. Your privacy matters',
+    value:
+      'Jangan pernah membagikan data pribadi. No nomor telepon, alamat, atau informasi sensitif lainnya, baik milikmu maupun orang lain.'
+  },
+  {
+    name: '8. Follow Discord rules (ToS)',
+    value:
+      'Selain aturan server ini, semua member juga wajib mematuhi Terms of Service dan Community Guidelines Discord.'
+  },
+  {
+    name: '9. Sanksi untuk pelanggar aturan',
+    value:
+      'Pelanggaran akan ditindak bertahap:\n• Peringatan (first warning)\n• Mute 1 hari\n• Mute 3 hari\n• Permanent ban'
+  }
+];
+
+async function configureRulesPermissions(guild) {
+  const category = guild.channels.cache.get(RULES_CATEGORY_ID);
+  const rulesChannel = guild.channels.cache.get(RULES_CHANNEL_ID);
+  const hackedAccountChannel = guild.channels.cache.get(HACKED_ACCOUNT_CHANNEL_ID);
+
+  if (!category || category.type !== ChannelType.GuildCategory) {
+    throw new Error(`Kategori rules ${RULES_CATEGORY_ID} tidak ditemukan atau bukan category.`);
+  }
+  if (!rulesChannel?.isTextBased()) {
+    throw new Error(`Channel rules ${RULES_CHANNEL_ID} tidak ditemukan atau bukan text channel.`);
+  }
+  if (!hackedAccountChannel?.isTextBased()) {
+    throw new Error(
+      `Channel akun ter-hack ${HACKED_ACCOUNT_CHANNEL_ID} tidak ditemukan atau bukan text channel.`
+    );
+  }
+
+  const everyone = guild.roles.everyone;
+  await category.permissionOverwrites.edit(everyone, {
+    ViewChannel: true,
+    ReadMessageHistory: true,
+    AddReactions: true,
+    SendMessages: false,
+    CreatePublicThreads: false,
+    CreatePrivateThreads: false,
+    SendMessagesInThreads: false
+  });
+  await rulesChannel.permissionOverwrites.edit(everyone, {
+    ViewChannel: true,
+    ReadMessageHistory: true,
+    AddReactions: true,
+    SendMessages: false,
+    CreatePublicThreads: false,
+    CreatePrivateThreads: false,
+    SendMessagesInThreads: false
+  });
+  await hackedAccountChannel.permissionOverwrites.edit(everyone, {
+    ViewChannel: true,
+    ReadMessageHistory: true,
+    AddReactions: true,
+    SendMessages: true,
+    CreatePublicThreads: true,
+    CreatePrivateThreads: true,
+    SendMessagesInThreads: true
+  });
+
+  console.log('✅ Permission category rules dan channel pengecualian berhasil diatur.');
+}
+
+async function setupRulesEmbed(guild, client) {
+  const rulesChannel = guild.channels.cache.get(RULES_CHANNEL_ID);
+  const embedColor = process.env.EMBED_COLOR || '#FF8474';
+  const rulesEmbed = new EmbedBuilder()
+    .setColor(embedColor)
+    .setTitle('🍑 Selamat datang di AthiStore21')
+    .setDescription(
+      'Tolong luangkan waktu sebentar untuk membaca aturan di bawah ini agar semua member bisa merasa aman & nyaman.\n\n' +
+        '· · · · · · · · · · · · · · ·'
+    )
+    .addFields(rules)
+    .setFooter({
+      text: 'AthiStore21 • Dengan tetap berada di server, kamu dianggap menyetujui aturan ini.',
+      iconURL: guild.iconURL() || undefined
+    })
+    .setTimestamp();
+
+  const oldMessages = await rulesChannel.messages.fetch({ limit: 50 });
+  const botMessages = oldMessages.filter((message) => message.author.id === client.user.id);
+  for (const message of botMessages.values()) {
+    await message.delete();
+  }
+
+  await rulesChannel.send({ embeds: [rulesEmbed] });
+  console.log(`✅ Embed rules berhasil dikirim ke #${rulesChannel.name} (${RULES_CHANNEL_ID}).`);
+}
+
 client.on('ready', async () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
   const guildId = process.env.GUILD_ID;
@@ -25,6 +153,17 @@ client.on('ready', async () => {
   }
 
   const embedColor = process.env.EMBED_COLOR || '#FF8474';
+
+  console.log('====================================================');
+  console.log('0. Mengatur Rules & Permission...');
+  console.log('====================================================');
+  try {
+    await configureRulesPermissions(guild);
+    await setupRulesEmbed(guild, client);
+  } catch (err) {
+    console.error('❌ Gagal mengatur rules atau permission:', err.message);
+    process.exit(1);
+  }
 
   console.log('====================================================');
   console.log('1. Memasang Status Channels di Kategori STATUS...');

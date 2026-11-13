@@ -117,6 +117,19 @@ npm run deploy
 ```
 *Catatan: Jika `GUILD_ID` diisi di file `.env`, commands akan langsung aktif seketika di server tersebut tanpa perlu menunggu propagasi global Discord.*
 
+### 🧩 Memasang Panel & Rules Server
+
+Jalankan script berikut untuk memasang panel layanan, embed rules, dan permission channel:
+
+```bash
+npm run setup-panels
+```
+
+Perintah tersebut memasang embed rules pada channel `1570116401333539038` dan mengatur
+permission category `1570115603119734834`: member dapat melihat riwayat serta memberi reaction,
+tetapi tidak dapat mengirim pesan. Channel `1570116755261759600` menjadi pengecualian agar
+semua member dapat mengirim laporan akun yang ter-hack.
+
 ---
 
 ## ▶️ Menjalankan Bot
