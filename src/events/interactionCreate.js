@@ -36,6 +36,19 @@ const SEND_PRICELIST = [
 
 // In-memory storage untuk pending order sebelum dikonfirmasi
 const pendingOrders = new Map();
+const interactionUpdateDefers = new WeakMap();
+
+async function deferUpdateIfNeeded(interaction) {
+  if (interaction.deferred || interaction.replied) return;
+  const existingDefer = interactionUpdateDefers.get(interaction);
+  if (existingDefer) return existingDefer;
+
+  const deferPromise = interaction.deferUpdate().finally(() => {
+    interactionUpdateDefers.delete(interaction);
+  });
+  interactionUpdateDefers.set(interaction, deferPromise);
+  await deferPromise;
+}
 
 function formatRupiah(num) {
   return 'Rp ' + num.toLocaleString('id-ID');
@@ -182,7 +195,7 @@ module.exports = {
         }
 
         pendingOrders.delete(pendingKey);
-        await interaction.deferUpdate();
+        await deferUpdateIfNeeded(interaction);
         await interaction.editReply({
           content: '✅ Pesanan dikonfirmasi. Ticket privat sedang dibuat...',
           embeds: [],
@@ -273,7 +286,7 @@ module.exports = {
       }
 
       if (customId === 'ticket_success_confirm') {
-        await interaction.deferUpdate();
+        await deferUpdateIfNeeded(interaction);
         return ticketService.closeTicket(interaction, {
           isSuccess: true,
           reason: 'Transaksi berhasil dikonfirmasi oleh staff.'
@@ -304,7 +317,7 @@ module.exports = {
       }
 
       if (customId === 'ticket_close_confirm') {
-        await interaction.deferUpdate();
+        await deferUpdateIfNeeded(interaction);
         return ticketService.closeTicket(interaction, {
           isSuccess: false,
           reason: 'Ditutup atas permintaan customer/staf.'
@@ -350,7 +363,7 @@ module.exports = {
           .setFooter({ text: 'Athi Store • Layanan Cepat & Terpercaya' })
           .setTimestamp();
 
-        await interaction.deferUpdate();
+        await deferUpdateIfNeeded(interaction);
         await interaction.editReply({
           embeds: [confirmedEmbed],
           components: []
@@ -512,7 +525,7 @@ module.exports = {
       // ----------------------------------------------------------
       if (customId === 'select_pricelist_category') {
         const selectedCategory = values[0];
-        await interaction.deferUpdate();
+        await deferUpdateIfNeeded(interaction);
         const products = await storeService.getProducts(selectedCategory);
 
         let desc = `### 🍑 Katalog: ${selectedCategory}\n\n`;
