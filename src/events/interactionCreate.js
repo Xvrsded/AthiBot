@@ -85,7 +85,7 @@ async function ensureServiceOpen(interaction, serviceKey, serviceLabel) {
 }
 
 async function refreshDashboard(interaction, config = null) {
-  await storeDashboardService.updateDashboard(interaction.guild, config);
+  return storeDashboardService.updateDashboard(interaction.guild, config);
 }
 
 /**
@@ -156,8 +156,10 @@ module.exports = {
 
         if (customId === 'store_refresh') {
           await interaction.deferReply({ ephemeral: true });
-          await refreshDashboard(interaction);
-          return interaction.editReply({ content: '✅ Dashboard berhasil diperbarui.' });
+          const result = await refreshDashboard(interaction);
+          return interaction.editReply({
+            content: `✅ Dashboard dan ${result.updatedStatusChannels} channel STATUS berhasil disinkronkan.`
+          });
         }
 
         const statusService = customId.replace('store_toggle_', '');
@@ -168,9 +170,11 @@ module.exports = {
             statusService,
             !current
           );
-          await refreshDashboard(interaction, config);
+          const result = await refreshDashboard(interaction, config);
           return interaction.reply({
-            content: `✅ Status **${storeDashboardService.SERVICE_LABELS[statusService]}** sekarang **${!current ? 'OPEN' : 'CLOSED'}**.`,
+            content:
+              `✅ Status **${storeDashboardService.SERVICE_LABELS[statusService]}** sekarang **${!current ? 'OPEN' : 'CLOSED'}**.\n` +
+              `🔄 ${result.updatedStatusChannels} channel STATUS diperbarui.`,
             ephemeral: true
           });
         }

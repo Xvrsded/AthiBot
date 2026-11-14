@@ -37,16 +37,21 @@ async function updateStatusChannels(guild, config) {
     'VIA LOGIN': `📦 | VIA LOGIN: ${status.login !== false ? '✅' : '❌'}`
   };
 
-  const channels = guild.channels.cache.filter((channel) => channel.parentId === STATUS_CATEGORY_ID);
-  for (const channel of channels.values()) {
-    const label = Object.keys(names).find((key) => channel.name.includes(`| ${key}:`));
+  const channels = await guild.channels.fetch();
+  const statusChannels = channels.filter((channel) => channel?.parentId === STATUS_CATEGORY_ID);
+  let updatedCount = 0;
+  for (const channel of statusChannels.values()) {
+    const channelLabel = channel.name.match(/\|\s*([^:]+):/)?.[1]?.trim().toUpperCase();
+    const label = Object.keys(names).find((key) => channelLabel === key);
     if (!label || channel.name === names[label]) continue;
     try {
       await channel.setName(names[label], 'Sinkronisasi status dashboard toko');
+      updatedCount++;
     } catch (error) {
       console.error(`❌ Gagal memperbarui status channel ${channel.id}:`, error.message);
     }
   }
+  return updatedCount;
 }
 
 async function getConfig(guildId) {
@@ -147,8 +152,8 @@ async function updateDashboard(guild, config = null) {
   resolvedConfig.storeDashboardChannelId = channel.id;
   resolvedConfig.storeDashboardMessageId = message.id;
   await resolvedConfig.save();
-  await updateStatusChannels(guild, resolvedConfig);
-  return message;
+  const updatedStatusChannels = await updateStatusChannels(guild, resolvedConfig);
+  return { message, updatedStatusChannels };
 }
 
 async function setServiceStatus(guildId, service, isOpen) {
