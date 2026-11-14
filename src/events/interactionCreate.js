@@ -66,6 +66,24 @@ function parsePositiveNumber(value, label) {
   return number;
 }
 
+async function ensureServiceOpen(interaction, serviceKey, serviceLabel) {
+  const isOpen = await storeDashboardService.getServiceStatus(interaction.guild.id, serviceKey);
+  if (isOpen) return true;
+
+  const closedEmbed = new EmbedBuilder()
+    .setColor('#E74C3C')
+    .setTitle('🔒 Toko Sedang Tutup')
+    .setDescription(
+      `Layanan **${serviceLabel}** sedang ditutup oleh staff.\n\n` +
+      'Silakan tunggu hingga staff membuka toko kembali.'
+    )
+    .setFooter({ text: 'Athi Store • Mohon menunggu' })
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [closedEmbed], ephemeral: true });
+  return false;
+}
+
 async function refreshDashboard(interaction, config = null) {
   await storeDashboardService.updateDashboard(interaction.guild, config);
 }
@@ -227,6 +245,7 @@ module.exports = {
       // ROBUX VIA SEND: Tombol "Order" → Tampilkan dropdown paket
       // ----------------------------------------------------------
       if (customId === 'send_order_start') {
+        if (!(await ensureServiceOpen(interaction, 'send', 'Robux Via Username / Send'))) return;
         const products = await storeService.getProducts('ROBUX VIA USERNAME');
         const options = products.map(p => ({
           label: `${p.amount} Robux — ${formatRupiah(p.price)}`,
@@ -252,10 +271,12 @@ module.exports = {
       }
 
       if (customId === 'gift_order_start') {
+        if (!(await ensureServiceOpen(interaction, 'gift', 'Gift In Game'))) return;
         return showGiftOrderModal(interaction);
       }
 
       if (customId.startsWith('gift_edit_')) {
+        if (!(await ensureServiceOpen(interaction, 'gift', 'Gift In Game'))) return;
         return showGiftOrderModal(interaction, customId.replace('gift_edit_', ''));
       }
 
@@ -465,6 +486,7 @@ module.exports = {
       // ROBUX VIA SEND: Edit Order → Kembali ke dropdown paket
       // ----------------------------------------------------------
       if (customId.startsWith('send_edit_')) {
+        if (!(await ensureServiceOpen(interaction, 'send', 'Robux Via Username / Send'))) return;
         const pendingKey = customId.replace('send_edit_', '');
         pendingOrders.delete(pendingKey);
 
