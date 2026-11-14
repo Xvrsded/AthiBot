@@ -1,6 +1,9 @@
 const { Events, EmbedBuilder } = require('discord.js');
 const GuildConfig = require('../models/GuildConfig');
 
+const MEMBER_ROLE_ID = '1570726972362068009';
+const BOT_ROLE_ID = '1571067541781221446';
+
 /**
  * Event: GuildMemberAdd
  * Dipanggil ketika ada member baru yang bergabung ke server.
@@ -10,6 +13,15 @@ module.exports = {
   name: Events.GuildMemberAdd,
   async execute(member) {
     try {
+      const roleId = member.user.bot ? BOT_ROLE_ID : MEMBER_ROLE_ID;
+      const role = member.guild.roles.cache.get(roleId);
+
+      if (!role) {
+        console.error(`❌ Role ${roleId} tidak ditemukan di server ${member.guild.id}.`);
+      } else {
+        await member.roles.add(role, 'Assign role otomatis saat member bergabung');
+      }
+
       const config = await GuildConfig.findOne({ guildId: member.guild.id });
       if (!config || !config.welcomeEnabled || !config.welcomeChannelId) return;
 
