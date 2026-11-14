@@ -9,6 +9,7 @@ const {
 const path = require('path');
 const Ticket = require('../models/Ticket');
 const GuildConfig = require('../models/GuildConfig');
+const storeDashboardService = require('./storeDashboardService');
 
 // In-Memory Lock untuk mencegah spam-click pembuatan tiket ganda (Audit CON-01)
 const creatingTickets = new Set();
@@ -56,6 +57,26 @@ class TicketService {
 
     if (!interaction.deferred && !interaction.replied) {
       await interaction.deferReply({ ephemeral: true });
+    }
+
+    const serviceKey = category === 'Robux Via Send'
+      ? 'send'
+      : category === 'Robux Via Login'
+        ? 'login'
+        : category === 'Gift In Game'
+          ? 'gift'
+          : null;
+    if (serviceKey && !(await storeDashboardService.getServiceStatus(guild.id, serviceKey))) {
+      const embed = new EmbedBuilder()
+        .setColor('#E74C3C')
+        .setTitle('🔒 Toko Sedang Tutup')
+        .setDescription(
+          `Layanan **${category}** sedang ditutup oleh staff.\n\n` +
+          'Silakan tunggu hingga staff membuka toko kembali.'
+        )
+        .setFooter({ text: 'Athi Store • Mohon menunggu' })
+        .setTimestamp();
+      return interaction.editReply({ content: '', embeds: [embed], components: [] });
     }
 
     if (creatingTickets.has(lockKey)) {

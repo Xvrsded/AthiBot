@@ -17,22 +17,7 @@ const storeService = require('../services/storeService');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const GuildConfig = require('../models/GuildConfig');
-
-// Pricelist Robux Via Send (hardcoded sesuai daftar toko)
-const SEND_PRICELIST = [
-  { label: '25 Robux — Rp 5.000',   value: 'send_25',   amount: 25,   price: 5000 },
-  { label: '50 Robux — Rp 9.000',   value: 'send_50',   amount: 50,   price: 9000 },
-  { label: '100 Robux — Rp 15.600', value: 'send_100',  amount: 100,  price: 15600 },
-  { label: '200 Robux — Rp 31.200', value: 'send_200',  amount: 200,  price: 31200 },
-  { label: '300 Robux — Rp 46.800', value: 'send_300',  amount: 300,  price: 46800 },
-  { label: '400 Robux — Rp 62.400', value: 'send_400',  amount: 400,  price: 62400 },
-  { label: '500 Robux — Rp 78.000', value: 'send_500',  amount: 500,  price: 78000 },
-  { label: '600 Robux — Rp 93.600', value: 'send_600',  amount: 600,  price: 93600 },
-  { label: '700 Robux — Rp 109.200', value: 'send_700', amount: 700, price: 109200 },
-  { label: '800 Robux — Rp 124.800', value: 'send_800', amount: 800, price: 124800 },
-  { label: '900 Robux — Rp 140.400', value: 'send_900', amount: 900, price: 140400 },
-  { label: '1000 Robux — Rp 156.000', value: 'send_1000', amount: 1000, price: 156000 }
-];
+const storeDashboardService = require('../services/storeDashboardService');
 
 // In-memory storage untuk pending order sebelum dikonfirmasi
 const pendingOrders = new Map();
@@ -54,16 +39,35 @@ function formatRupiah(num) {
   return 'Rp ' + num.toLocaleString('id-ID');
 }
 
-function getSendPacket(value) {
-  return SEND_PRICELIST.find(p => p.value === value) || null;
+async function getSendPacket(value) {
+  const amount = Number(value.replace('send_', ''));
+  if (!Number.isInteger(amount) || amount <= 0) return null;
+  return Product.findOne({ category: 'ROBUX VIA USERNAME', amount, isActive: true }).lean();
 }
 
 function formatGiftPrice(amount) {
   return `Rp ${amount.toLocaleString('id-ID')}`;
 }
 
-function calculateGiftPrice(robux) {
-  return Math.ceil(robux * 95 / 500) * 500;
+function calculateGiftPrice(robux, rate) {
+  return Math.ceil(robux * rate / 500) * 500;
+}
+
+function isDashboardManager(interaction) {
+  return interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
+}
+
+function parsePositiveNumber(value, label) {
+  const normalized = value.replace(/[.,\s]/g, '');
+  const number = Number(normalized);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${label} harus berupa angka bulat 0 atau lebih.`);
+  }
+  return number;
+}
+
+async function refreshDashboard(interaction, config = null) {
+  await storeDashboardService.updateDashboard(interaction.guild, config);
 }
 
 /**
@@ -124,6 +128,83 @@ module.exports = {
     if (interaction.isButton()) {
       const { customId } = interaction;
 
+      if (customId.startsWith('store_')) {
+        if (!isDashboardManager(interaction)) {
+          return interaction.reply({
+            content: '❌ Hanya Admin / Manage Server yang dapat mengubah dashboard toko.',
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'store_refresh') {
+          await interaction.deferReply({ ephemeral: true });
+          await refreshDashboard(interaction);
+          return interaction.editReply({ content: '✅ Dashboard berhasil diperbarui.' });
+        }
+
+        const statusService = customId.replace('store_toggle_', '');
+        if (['send', 'login', 'gift'].includes(statusService)) {
+          const current = await storeDashboardService.getServiceStatus(interaction.guild.id, statusService);
+          const config = await storeDashboardService.setServiceStatus(
+            interaction.guild.id,
+            statusService,
+            !current
+          );
+          await refreshDashboard(interaction, config);
+          return interaction.reply({
+            content: `✅ Status **${storeDashboardService.SERVICE_LABELS[statusService]}** sekarang **${!current ? 'OPEN' : 'CLOSED'}**.`,
+            ephemeral: true
+          });
+        }
+
+        const numericFields = {
+          store_stock_send: ['stockViaSend', 'Stock Via Send'],
+          store_stock_gift: ['stockGift', 'Stock Gift In Game'],
+          store_rate_gift: ['giftRate', 'Rate Gift In Game']
+        };
+        if (numericFields[customId]) {
+          const [field, label] = numericFields[customId];
+          const modal = new ModalBuilder()
+            .setCustomId(`store_numeric_${field}`)
+            .setTitle(`Ubah ${label}`);
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId('value')
+                .setLabel(`${label} (angka saja)`)
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('Contoh: 23000')
+                .setRequired(true)
+                .setMaxLength(12)
+            )
+          );
+          return interaction.showModal(modal);
+        }
+
+        if (customId === 'store_price_send' || customId === 'store_price_login') {
+          const category = customId === 'store_price_send' ? 'ROBUX VIA USERNAME' : 'ROBUX VILOG';
+          const products = await storeService.getProducts(category);
+          if (!products.length) {
+            return interaction.reply({ content: '❌ Belum ada paket harga untuk kategori ini.', ephemeral: true });
+          }
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId(`store_price_select_${category === 'ROBUX VIA USERNAME' ? 'send' : 'login'}`)
+            .setPlaceholder('Pilih paket yang ingin diubah...')
+            .addOptions(
+              products.map((product) => ({
+                label: `${product.amount} Robux`,
+                description: `Harga saat ini: Rp ${product.price.toLocaleString('id-ID')}`,
+                value: product.id
+              }))
+            );
+          return interaction.reply({
+            content: `💸 Pilih paket **${category}** yang ingin diubah:`,
+            components: [new ActionRowBuilder().addComponents(selectMenu)],
+            ephemeral: true
+          });
+        }
+      }
+
       if (customId === 'payment_qris_malaysia' || customId === 'payment_qris_indonesia') {
         const isMalaysia = customId === 'payment_qris_malaysia';
         const filePath = path.join(
@@ -146,11 +227,15 @@ module.exports = {
       // ROBUX VIA SEND: Tombol "Order" → Tampilkan dropdown paket
       // ----------------------------------------------------------
       if (customId === 'send_order_start') {
-        const options = SEND_PRICELIST.map(p => ({
-          label: p.label,
-          description: `${p.amount} Robux • berlaku kelipatan`,
-          value: p.value
+        const products = await storeService.getProducts('ROBUX VIA USERNAME');
+        const options = products.map(p => ({
+          label: `${p.amount} Robux — ${formatRupiah(p.price)}`,
+          description: 'Berlaku kelipatan',
+          value: `send_${p.amount}`
         }));
+        if (!options.length) {
+          return interaction.reply({ content: '❌ Pricelist Robux Via Send belum tersedia.', ephemeral: true });
+        }
 
         const selectRow = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
@@ -383,10 +468,11 @@ module.exports = {
         const pendingKey = customId.replace('send_edit_', '');
         pendingOrders.delete(pendingKey);
 
-        const options = SEND_PRICELIST.map(p => ({
-          label: p.label,
-          description: `${p.amount} Robux • berlaku kelipatan`,
-          value: p.value
+        const products = await storeService.getProducts('ROBUX VIA USERNAME');
+        const options = products.map(p => ({
+          label: `${p.amount} Robux — ${formatRupiah(p.price)}`,
+          description: 'Berlaku kelipatan',
+          value: `send_${p.amount}`
         }));
 
         const selectRow = new ActionRowBuilder().addComponents(
@@ -495,7 +581,7 @@ module.exports = {
       // ----------------------------------------------------------
       if (customId === 'select_send_packet') {
         const selectedValue = values[0];
-        const packet = getSendPacket(selectedValue);
+        const packet = await getSendPacket(selectedValue);
 
         if (!packet) {
           return interaction.reply({ content: '❌ Paket tidak ditemukan.', ephemeral: true });
@@ -613,6 +699,30 @@ module.exports = {
 
         return interaction.showModal(modal);
       }
+
+      if (customId.startsWith('store_price_select_')) {
+        const product = await Product.findById(values[0]);
+        if (!product) {
+          return interaction.reply({ content: '❌ Paket harga tidak ditemukan.', ephemeral: true });
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId(`store_price_${product.id}`)
+          .setTitle(`Ubah Harga ${product.amount} Robux`);
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('price')
+              .setLabel('Harga baru (angka saja)')
+              .setStyle(TextInputStyle.Short)
+              .setValue(String(product.price))
+              .setPlaceholder('Contoh: 15600')
+              .setRequired(true)
+              .setMaxLength(12)
+          )
+        );
+        return interaction.showModal(modal);
+      }
     }
 
     // ============================================================
@@ -626,7 +736,7 @@ module.exports = {
       // ----------------------------------------------------------
       if (customId.startsWith('modal_send_username_')) {
         const packetValue = customId.replace('modal_send_username_', '');
-        const packet = getSendPacket(packetValue);
+        const packet = await getSendPacket(packetValue);
         const robloxUsername = interaction.fields.getTextInputValue('send_roblox_user').trim();
 
         if (!packet) {
@@ -692,6 +802,43 @@ module.exports = {
         });
       }
 
+      if (customId.startsWith('store_numeric_') || customId.startsWith('store_price_')) {
+        if (!isDashboardManager(interaction)) {
+          return interaction.reply({
+            content: '❌ Hanya Admin / Manage Server yang dapat mengubah dashboard toko.',
+            ephemeral: true
+          });
+        }
+
+        try {
+          if (customId.startsWith('store_numeric_')) {
+            const field = customId.replace('store_numeric_', '');
+            const allowedFields = ['stockViaSend', 'stockGift', 'giftRate'];
+            if (!allowedFields.includes(field)) throw new Error('Field dashboard tidak valid.');
+            const value = parsePositiveNumber(interaction.fields.getTextInputValue('value'), field);
+            const config = await storeDashboardService.setNumericValue(interaction.guild.id, field, value);
+            await refreshDashboard(interaction, config);
+            return interaction.reply({ content: '✅ Nilai dashboard berhasil diperbarui.', ephemeral: true });
+          }
+
+          const productId = customId.replace('store_price_', '');
+          const price = parsePositiveNumber(interaction.fields.getTextInputValue('price'), 'Harga');
+          const product = await Product.findByIdAndUpdate(
+            productId,
+            { $set: { price } },
+            { new: true }
+          );
+          if (!product) throw new Error('Paket harga tidak ditemukan.');
+          await refreshDashboard(interaction);
+          return interaction.reply({
+            content: `✅ Harga **${product.amount} Robux** diubah menjadi **Rp ${price.toLocaleString('id-ID')}**.`,
+            ephemeral: true
+          });
+        } catch (error) {
+          return interaction.reply({ content: `❌ ${error.message}`, ephemeral: true });
+        }
+      }
+
       if (customId.startsWith('modal_gift_order')) {
         const robloxUsername = interaction.fields.getTextInputValue('gift_roblox_user').trim();
         const gameName = interaction.fields.getTextInputValue('gift_game_name').trim();
@@ -706,7 +853,9 @@ module.exports = {
           });
         }
 
-        const totalPrice = calculateGiftPrice(robuxAmount);
+        const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+        const giftRate = config?.giftRate ?? 95;
+        const totalPrice = calculateGiftPrice(robuxAmount, giftRate);
         const pendingKey = `${interaction.user.id}_${Date.now()}`;
         pendingOrders.set(pendingKey, {
           type: 'gift',
@@ -730,7 +879,7 @@ module.exports = {
             `🎁 **Jenis Gamepass:** ${gamepassType}\n` +
             `💎 **Total Robux:** ${robuxAmount.toLocaleString('id-ID')} Robux\n` +
             `💰 **Total Harga:** **${formatGiftPrice(totalPrice)}**\n\n` +
-            'Rate: **1 Robux = Rp 95**. Harga dibulatkan ke atas ke nominal genap kelipatan Rp500.'
+            `Rate: **1 Robux = Rp ${giftRate.toLocaleString('id-ID')}**. Harga dibulatkan ke atas ke nominal genap kelipatan Rp500.`
           )
           .setFooter({ text: 'Athi Store • Pesanan belum diproses sampai dikonfirmasi' })
           .setTimestamp();

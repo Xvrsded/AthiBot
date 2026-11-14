@@ -55,6 +55,34 @@ const guildConfigSchema = new mongoose.Schema(
     embedColor: {
       type: String,
       default: process.env.EMBED_COLOR || '#FF8474'
+    },
+    storeStatus: {
+      send: { type: Boolean, default: true },
+      login: { type: Boolean, default: true },
+      gift: { type: Boolean, default: true }
+    },
+    stockViaSend: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    stockGift: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    giftRate: {
+      type: Number,
+      default: 95,
+      min: 0
+    },
+    storeDashboardChannelId: {
+      type: String,
+      default: null
+    },
+    storeDashboardMessageId: {
+      type: String,
+      default: null
     }
   },
   {

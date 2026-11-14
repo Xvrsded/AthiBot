@@ -1,5 +1,6 @@
 const { Events, ActivityType } = require('discord.js');
 const databaseService = require('../services/databaseService');
+const storeDashboardService = require('../services/storeDashboardService');
 
 const PROTECTED_CHANNEL_ID = '1570116755261759600';
 
@@ -33,6 +34,14 @@ module.exports = {
 
     // Inisialisasi koneksi MongoDB jika belum
     await databaseService.connect();
+
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await storeDashboardService.updateDashboard(guild);
+      } catch (error) {
+        console.error(`❌ Gagal memperbarui dashboard toko di ${guild.name}:`, error.message);
+      }
+    }
 
     const protectedChannel = client.channels.cache.get(PROTECTED_CHANNEL_ID);
     if (protectedChannel?.isTextBased()) {
