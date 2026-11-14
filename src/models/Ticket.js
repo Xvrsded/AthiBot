@@ -53,6 +53,46 @@ const ticketSchema = new mongoose.Schema(
       type: Number,
       default: null
     },
+    orders: [
+      {
+        orderType: {
+          type: String,
+          default: 'ORDER'
+        },
+        nominal: {
+          type: String,
+          default: '-'
+        },
+        price: {
+          type: String,
+          default: '-'
+        },
+        priceAmount: {
+          type: Number,
+          default: null
+        },
+        robuxAmount: {
+          type: Number,
+          default: null
+        },
+        robloxUsername: {
+          type: String,
+          default: null
+        },
+        gameName: {
+          type: String,
+          default: null
+        },
+        gamepassType: {
+          type: String,
+          default: null
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now
+        }
+      }
+    ],
     gameName: {
       type: String,
       default: null

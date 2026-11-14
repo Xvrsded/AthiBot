@@ -27,6 +27,61 @@ const paymentButtons = new ActionRowBuilder().addComponents(
     .setStyle(ButtonStyle.Success)
 );
 
+function buildOrderRecord(category, orderDetails = {}) {
+  const robuxAmount = orderDetails.packet?.amount || orderDetails.robuxAmount || null;
+  const priceAmount = orderDetails.packet?.price || orderDetails.totalPrice || null;
+
+  return {
+    orderType: category,
+    nominal: robuxAmount ? `${robuxAmount} Robux` : orderDetails.nominal || 'Detail menyusul',
+    price: priceAmount ? `Rp ${priceAmount.toLocaleString('id-ID')}` : orderDetails.price || 'Detail menyusul',
+    priceAmount,
+    robuxAmount,
+    robloxUsername: orderDetails.robloxUsername || null,
+    gameName: orderDetails.gameName || null,
+    gamepassType: orderDetails.gamepassType || null,
+    createdAt: new Date()
+  };
+}
+
+function getOrderRecords(ticket) {
+  if (ticket.orders?.length) return ticket.orders.map((order) => order.toObject?.() || order);
+
+  if (ticket.orderNominal !== '-' || ticket.orderPrice !== '-' || ticket.robuxAmount) {
+    const priceAmount = Number(String(ticket.orderPrice).replace(/[^\d]/g, '')) || null;
+    return [
+      {
+        orderType: ticket.category,
+        nominal: ticket.orderNominal,
+        price: ticket.orderPrice,
+        priceAmount,
+        robuxAmount: ticket.robuxAmount,
+        robloxUsername: null,
+        gameName: ticket.gameName,
+        gamepassType: ticket.gamepassType,
+        createdAt: ticket.createdAt
+      }
+    ];
+  }
+
+  return [];
+}
+
+function updateTicketOrderSummary(ticket) {
+  const records = getOrderRecords(ticket);
+  const totalRobux = records.reduce((sum, order) => sum + (order.robuxAmount || 0), 0);
+  const totalPrice = records.reduce((sum, order) => sum + (order.priceAmount || 0), 0);
+
+  ticket.robuxAmount = totalRobux || null;
+  ticket.orderNominal = totalRobux
+    ? `${totalRobux.toLocaleString('id-ID')} Robux (${records.length} order)`
+    : records.map((order) => order.nominal).filter((value) => value !== '-').join(' + ') || '-';
+  ticket.orderPrice = totalPrice
+    ? `Rp ${totalPrice.toLocaleString('id-ID')}`
+    : records.map((order) => order.price).filter((value) => value !== '-').join(' + ') || '-';
+  return { records, totalRobux, totalPrice };
+}
+
 /**
  * Service Sistem Tiket Athi Store
  * Menangani pembuatan channel tiket privat, klaim staf, dan pencatatan log transaksi sukses.
@@ -37,6 +92,78 @@ class TicketService {
    */
   getEmbedColor() {
     return process.env.EMBED_COLOR || '#FF8474';
+  }
+
+  async findActiveTicket(guildId, userId, category) {
+    return Ticket.findOne({
+      guildId,
+      userId,
+      category,
+      status: { $in: ['OPEN', 'CLAIMED'] }
+    });
+  }
+
+  async addBulkOrder(interaction, ticket, category, orderDetails = {}) {
+    const channel = interaction.guild.channels.cache.get(ticket.channelId) ||
+      await interaction.guild.channels.fetch(ticket.channelId).catch(() => null);
+    if (!channel) throw new Error('Channel ticket aktif tidak ditemukan.');
+
+    const orderRecord = buildOrderRecord(category, orderDetails);
+    const records = getOrderRecords(ticket);
+    records.push(orderRecord);
+    ticket.orders = records;
+    const summary = updateTicketOrderSummary(ticket);
+    await ticket.save();
+
+    const messages = await channel.messages.fetch({ limit: 50 });
+    const ticketMessage = messages.find(
+      (message) =>
+        message.author.id === interaction.client.user.id &&
+        message.embeds[0]?.title?.includes(`Tiket: ${ticket.category}`)
+    );
+
+    if (ticketMessage) {
+      const embed = EmbedBuilder.from(ticketMessage.embeds[0]);
+      const fields = (embed.data.fields || []).map((field) => {
+        if (field.name === '💎 Jumlah Robux') {
+          return { ...field, value: summary.totalRobux ? `${summary.totalRobux.toLocaleString('id-ID')} Robux` : 'Menunggu detail' };
+        }
+        if (field.name === '💰 Nominal Uang') {
+          return { ...field, value: summary.totalPrice ? `Rp ${summary.totalPrice.toLocaleString('id-ID')}` : 'Menunggu perhitungan' };
+        }
+        return field;
+      });
+      await ticketMessage.edit({ embeds: [embed.setFields(fields)] });
+    }
+
+    const detailEmbed = new EmbedBuilder()
+      .setColor('#3498DB')
+      .setTitle(`➕ Bulk Order #${records.length}`)
+      .setDescription('Order tambahan berhasil dimasukkan ke ticket aktif.')
+      .addFields(
+        { name: '📦 Layanan', value: category, inline: true },
+        { name: '💎 Robux', value: orderRecord.nominal, inline: true },
+        { name: '💰 Nominal', value: orderRecord.price, inline: true }
+      )
+      .setTimestamp();
+
+    if (orderRecord.robloxUsername) {
+      detailEmbed.addFields({ name: '🎮 Username Roblox', value: orderRecord.robloxUsername, inline: true });
+    }
+    if (orderRecord.gameName) {
+      detailEmbed.addFields({ name: '🗺️ Nama / Link Map', value: orderRecord.gameName, inline: true });
+    }
+    if (orderRecord.gamepassType) {
+      detailEmbed.addFields({ name: '🎁 Jenis Gamepass', value: orderRecord.gamepassType, inline: true });
+    }
+
+    await channel.send({ content: `${interaction.user}`, embeds: [detailEmbed] });
+    await interaction.editReply({
+      content: `✅ Bulk order berhasil ditambahkan ke ticket ${channel}.\n` +
+        `Total ticket: **${summary.totalRobux ? `${summary.totalRobux.toLocaleString('id-ID')} Robux` : 'detail menyusul'}** / **${summary.totalPrice ? `Rp ${summary.totalPrice.toLocaleString('id-ID')}` : 'nominal menyusul'}**`,
+      embeds: [],
+      components: []
+    });
   }
 
   /**
@@ -218,6 +345,9 @@ class TicketService {
         robuxAmount: orderDetails.packet?.amount || orderDetails.robuxAmount || null,
         gameName: orderDetails.gameName || null,
         gamepassType: orderDetails.gamepassType || null,
+        orders: orderDetails.packet || orderDetails.robuxAmount || orderDetails.totalPrice
+          ? [buildOrderRecord(category, orderDetails)]
+          : [],
         status: 'OPEN'
       });
 
@@ -467,12 +597,32 @@ class TicketService {
             : 'Detail tidak tersedia';
     const resolvedTotalPrice = totalPrice !== '-' ? totalPrice : ticket.orderPrice || 'Detail tidak tersedia';
     const resolvedPaymentMethod = paymentMethod !== '-' ? paymentMethod : ticket.paymentMethod || '-';
+    const records = getOrderRecords(ticket);
+    if (!records.length) {
+      records.push({
+        orderType: ticket.category,
+        nominal: resolvedNominal,
+        price: resolvedTotalPrice,
+        priceAmount: Number(String(resolvedTotalPrice).replace(/[^\d]/g, '')) || null,
+        robuxAmount: ticket.robuxAmount,
+        robloxUsername: null,
+        gameName: ticket.gameName,
+        gamepassType: ticket.gamepassType,
+        createdAt: new Date()
+      });
+      ticket.orders = records;
+    }
+    const summary = updateTicketOrderSummary(ticket);
 
     // Update database
     ticket.status = 'CLOSED';
     ticket.isSuccess = isSuccess;
-    ticket.orderNominal = resolvedNominal;
-    ticket.orderPrice = resolvedTotalPrice;
+    ticket.orderNominal = summary.totalRobux
+      ? `${summary.totalRobux.toLocaleString('id-ID')} Robux (${records.length} order)`
+      : resolvedNominal;
+    ticket.orderPrice = summary.totalPrice
+      ? `Rp ${summary.totalPrice.toLocaleString('id-ID')}`
+      : resolvedTotalPrice;
     ticket.paymentMethod = resolvedPaymentMethod;
     ticket.closedBy = user.id;
     ticket.closedByName = user.tag || user.username;
@@ -485,45 +635,69 @@ class TicketService {
     if (isSuccess && transactionLogChannelId) {
       const txChannel = guild.channels.cache.get(transactionLogChannelId);
       if (txChannel) {
-        const txEmbed = new EmbedBuilder()
-          .setColor('#2ECC71')
-          .setTitle('🧾 Transaction Completed')
-          .setDescription(
-            `Pesanan telah berhasil diproses oleh Staff **${user.tag || user.username}**.\n` +
-            `Terima kasih telah berbelanja di **Athi Store** 🍑`
-          )
-          .setThumbnail(interaction.client.user.displayAvatarURL({ size: 256 }))
-          .addFields(
-            { name: '👤 Customer', value: `<@${ticket.userId}>`, inline: true },
-            { name: '👮 Staff', value: `<@${ticket.claimedBy || user.id}>`, inline: true },
-            { name: '📦 Produk', value: ticket.category, inline: true },
-            { name: '🎁 Paket / Nominal', value: resolvedNominal, inline: true },
-            { name: '💰 Total', value: resolvedTotalPrice, inline: true },
-            { name: '💳 Pembayaran', value: resolvedPaymentMethod, inline: true },
-            { name: '🆔 Order ID', value: `\`${ticket.ticketId}\``, inline: true },
-            { name: '✅ Status', value: 'Success', inline: true },
-            { name: '🕒 Waktu', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
-          );
+        for (const [index, order] of records.entries()) {
+          const txEmbed = new EmbedBuilder()
+            .setColor('#2ECC71')
+            .setTitle(`🧾 Transaction Completed${records.length > 1 ? ` — Order ${index + 1}/${records.length}` : ''}`)
+            .setDescription(
+              `Pesanan telah berhasil diproses oleh Staff **${user.tag || user.username}**.\n` +
+              `Terima kasih telah berbelanja di **Athi Store** 🍑`
+            )
+            .setThumbnail(interaction.client.user.displayAvatarURL({ size: 256 }))
+            .addFields(
+              { name: '👤 Customer', value: `<@${ticket.userId}>`, inline: true },
+              { name: '👮 Staff', value: `<@${ticket.claimedBy || user.id}>`, inline: true },
+              { name: '📦 Produk', value: ticket.category, inline: true },
+              { name: '🎁 Paket / Nominal', value: order.nominal || '-', inline: true },
+              { name: '💰 Total', value: order.price || '-', inline: true },
+              { name: '💳 Pembayaran', value: resolvedPaymentMethod, inline: true },
+              { name: '🆔 Order ID', value: `\`${ticket.ticketId}-${index + 1}\``, inline: true },
+              { name: '✅ Status', value: 'Success', inline: true },
+              { name: '🕒 Waktu', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
+            );
 
-        if (ticket.category === 'Gift In Game') {
-          txEmbed.addFields(
-            { name: '🗺️ Nama / Link Map', value: ticket.gameName || 'Tidak tersedia', inline: true },
-            { name: '🎮 Jenis Gamepass', value: ticket.gamepassType || 'Tidak tersedia', inline: true },
-            { name: '💎 Jumlah Robux', value: ticket.robuxAmount ? `${ticket.robuxAmount.toLocaleString('id-ID')} Robux` : 'Tidak tersedia', inline: true }
-          );
+          if (ticket.category === 'Gift In Game') {
+            txEmbed.addFields(
+              { name: '🗺️ Nama / Link Map', value: order.gameName || ticket.gameName || 'Tidak tersedia', inline: true },
+              { name: '🎮 Jenis Gamepass', value: order.gamepassType || ticket.gamepassType || 'Tidak tersedia', inline: true },
+              { name: '💎 Jumlah Robux', value: order.robuxAmount ? `${order.robuxAmount.toLocaleString('id-ID')} Robux` : 'Tidak tersedia', inline: true }
+            );
+          } else if (order.robuxAmount) {
+            txEmbed.addFields({
+              name: '💎 Jumlah Robux',
+              value: `${order.robuxAmount.toLocaleString('id-ID')} Robux`,
+              inline: true
+            });
+          }
+
+          if (reason && reason !== 'Selesai dihandle') {
+            txEmbed.addFields({ name: '📝 Catatan', value: reason, inline: false });
+          }
+
+          txEmbed
+            .setFooter({ text: 'Athi Store • Transaction Log', iconURL: guild.iconURL() || undefined })
+            .setTimestamp();
+
+          await txChannel.send({ embeds: [txEmbed] }).catch((e) => {
+            console.error('❌ Gagal mengirim log transaksi:', e.message);
+          });
         }
 
-        if (reason && reason !== 'Selesai dihandle') {
-          txEmbed.addFields({ name: '📝 Catatan', value: reason, inline: false });
+        if (records.length > 1) {
+          const summaryEmbed = new EmbedBuilder()
+            .setColor('#27AE60')
+            .setTitle('📊 Ringkasan Bulk Order')
+            .addFields(
+              { name: '👤 Customer', value: `<@${ticket.userId}>`, inline: true },
+              { name: '📦 Total Order', value: `${records.length}`, inline: true },
+              { name: '💎 Total Robux', value: summary.totalRobux ? `${summary.totalRobux.toLocaleString('id-ID')} Robux` : '-', inline: true },
+              { name: '💰 Total Nominal', value: summary.totalPrice ? `Rp ${summary.totalPrice.toLocaleString('id-ID')}` : '-', inline: true },
+              { name: '🆔 Ticket ID', value: `\`${ticket.ticketId}\``, inline: true }
+            )
+            .setFooter({ text: 'Athi Store • Ringkasan seluruh bulk order' })
+            .setTimestamp();
+          await txChannel.send({ embeds: [summaryEmbed] });
         }
-
-        txEmbed
-          .setFooter({ text: 'Athi Store • Transaction Log', iconURL: guild.iconURL() || undefined })
-          .setTimestamp();
-
-        await txChannel.send({ embeds: [txEmbed] }).catch((e) => {
-          console.error('❌ Gagal mengirim log transaksi:', e.message);
-        });
       }
     }
 
@@ -539,8 +713,8 @@ class TicketService {
             `Tiket kamu (**ID: \`${ticket.ticketId}\`**) pada layanan **${ticket.category}** telah resmi ditutup oleh staf **${user.tag}**.\n\n` +
             (isSuccess
               ? `✅ **Detail Transaksi:**\n` +
-                `• **Paket:** ${nominal}\n` +
-                `• **Total:** ${totalPrice}\n` +
+                `• **Paket:** ${ticket.orderNominal}\n` +
+                `• **Total:** ${ticket.orderPrice}\n` +
                 `• **Status:** Berhasil & Sukses!\n\n` +
                 `⭐ Jangan lupa tinggalkan testimoni / vouch kamu di channel <#1570118786718244995> yaa!\n` +
                 `Terima kasih telah berbelanja di **Athi Store**! 🍑`

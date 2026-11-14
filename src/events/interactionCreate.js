@@ -88,6 +88,79 @@ async function refreshDashboard(interaction, config = null) {
   return storeDashboardService.updateDashboard(interaction.guild, config);
 }
 
+function getPendingOrderDetails(pending) {
+  if (pending.packet) {
+    return {
+      nominal: `${pending.packet.amount} Robux`,
+      price: formatRupiah(pending.packet.price),
+      robloxUsername: pending.robloxUsername
+    };
+  }
+  if (pending.type === 'gift') {
+    return {
+      nominal: `${pending.robuxAmount.toLocaleString('id-ID')} Robux`,
+      price: formatGiftPrice(pending.totalPrice),
+      robloxUsername: pending.robloxUsername,
+      gameName: pending.gameName,
+      gamepassType: pending.gamepassType
+    };
+  }
+  return { nominal: 'Detail menyusul di ticket', price: 'Detail menyusul di ticket' };
+}
+
+async function showBulkConfirmation(interaction, pendingKey, pending, ticket) {
+  const details = getPendingOrderDetails(pending);
+  const embed = new EmbedBuilder()
+    .setColor('#F1C40F')
+    .setTitle('📦 Ticket Aktif Ditemukan')
+    .setDescription(
+      `Kamu masih memiliki ticket aktif untuk layanan **${pending.category}** di ${ticket.channelId ? `<#${ticket.channelId}>` : 'ticket lama'}.\n\n` +
+      'Apakah order ini ingin ditambahkan sebagai **Bulk Order** ke ticket tersebut?'
+    )
+    .addFields(
+      { name: '💎 Robux / Nominal', value: details.nominal, inline: true },
+      { name: '💰 Harga', value: details.price, inline: true },
+      ...(details.robloxUsername ? [{ name: '🎮 Username Roblox', value: details.robloxUsername, inline: true }] : []),
+      ...(details.gameName ? [{ name: '🗺️ Nama / Link Map', value: details.gameName, inline: true }] : []),
+      ...(details.gamepassType ? [{ name: '🎁 Jenis Gamepass', value: details.gamepassType, inline: true }] : [])
+    )
+    .setFooter({ text: 'Order baru belum ditambahkan sampai kamu menekan Konfirmasi Bulk.' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`bulk_confirm_${pendingKey}`)
+      .setLabel('✅ Tambahkan ke Ticket')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`bulk_cancel_${pendingKey}`)
+      .setLabel('❌ Batalkan')
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+}
+
+async function createOrOfferBulkTicket(interaction, category, orderDetails = {}) {
+  const serviceKey = category === 'Robux Via Send' ? 'send' : category === 'Robux Via Login' ? 'login' : 'gift';
+  if (!(await ensureServiceOpen(interaction, serviceKey, category))) return;
+
+  const activeTicket = await ticketService.findActiveTicket(interaction.guild.id, interaction.user.id, category);
+  if (!activeTicket) {
+    return ticketService.createTicketChannel(interaction, category, orderDetails);
+  }
+
+  const pendingKey = `ticket_${interaction.user.id}_${Date.now()}`;
+  pendingOrders.set(pendingKey, {
+    type: 'direct',
+    category,
+    ...orderDetails,
+    createdAt: Date.now()
+  });
+  setTimeout(() => pendingOrders.delete(pendingKey), 5 * 60 * 1000);
+  return showBulkConfirmation(interaction, pendingKey, pendingOrders.get(pendingKey), activeTicket);
+}
+
 /**
  * Event: InteractionCreate
  * Pusat pengendali semua interaksi Discord (Slash Command, Tombol, Select Menu, Modal).
@@ -293,6 +366,59 @@ module.exports = {
         });
       }
 
+      if (customId.startsWith('bulk_cancel_')) {
+        pendingOrders.delete(customId.replace('bulk_cancel_', ''));
+        return interaction.update({
+          content: '❌ Bulk order dibatalkan.',
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (customId.startsWith('bulk_confirm_')) {
+        const pendingKey = customId.replace('bulk_confirm_', '');
+        const pending = pendingOrders.get(pendingKey);
+        if (!pending) {
+          return interaction.update({
+            content: '❌ Data bulk order sudah kadaluarsa. Silakan buat pesanan baru.',
+            embeds: [],
+            components: []
+          });
+        }
+
+        const serviceKey = pending.category === 'Robux Via Send'
+          ? 'send'
+          : pending.category === 'Robux Via Login'
+            ? 'login'
+            : 'gift';
+        if (!(await storeDashboardService.getServiceStatus(interaction.guild.id, serviceKey))) {
+          pendingOrders.delete(pendingKey);
+          return interaction.update({
+            content: '🔒 Toko sedang tutup. Bulk order belum ditambahkan ke ticket.',
+            embeds: [],
+            components: []
+          });
+        }
+
+        const activeTicket = await ticketService.findActiveTicket(
+          interaction.guild.id,
+          interaction.user.id,
+          pending.category
+        );
+        if (!activeTicket) {
+          pendingOrders.delete(pendingKey);
+          return interaction.update({
+            content: '⚠️ Ticket sebelumnya sudah ditutup. Silakan buat order baru.',
+            embeds: [],
+            components: []
+          });
+        }
+
+        pendingOrders.delete(pendingKey);
+        await deferUpdateIfNeeded(interaction);
+        return ticketService.addBulkOrder(interaction, activeTicket, pending.category, pending);
+      }
+
       if (customId.startsWith('gift_confirm_')) {
         const pendingKey = customId.replace('gift_confirm_', '');
         const pending = pendingOrders.get(pendingKey);
@@ -302,6 +428,17 @@ module.exports = {
             embeds: [],
             components: []
           });
+        }
+
+        if (!(await ensureServiceOpen(interaction, 'gift', 'Gift In Game'))) return;
+        const activeTicket = await ticketService.findActiveTicket(
+          interaction.guild.id,
+          interaction.user.id,
+          'Gift In Game'
+        );
+        if (activeTicket) {
+          pending.category = 'Gift In Game';
+          return showBulkConfirmation(interaction, pendingKey, pending, activeTicket);
         }
 
         pendingOrders.delete(pendingKey);
@@ -325,13 +462,13 @@ module.exports = {
       // TIKET: Buat Tiket Berdasarkan Kategori (Login, Gift, Support, Report)
       // ----------------------------------------------------------
       if (customId === 'ticket_create_send') {
-        return ticketService.createTicketChannel(interaction, 'Robux Via Send');
+        return createOrOfferBulkTicket(interaction, 'Robux Via Send');
       }
       if (customId === 'ticket_create_login') {
-        return ticketService.createTicketChannel(interaction, 'Robux Via Login');
+        return createOrOfferBulkTicket(interaction, 'Robux Via Login');
       }
       if (customId === 'ticket_create_gift') {
-        return ticketService.createTicketChannel(interaction, 'Gift In Game');
+        return createOrOfferBulkTicket(interaction, 'Gift In Game');
       }
       if (customId === 'ticket_create_support') {
         return ticketService.createTicketChannel(interaction, 'Support');
@@ -454,6 +591,17 @@ module.exports = {
             embeds: [],
             components: []
           });
+        }
+
+        if (!(await ensureServiceOpen(interaction, 'send', 'Robux Via Username / Send'))) return;
+        const activeTicket = await ticketService.findActiveTicket(
+          interaction.guild.id,
+          interaction.user.id,
+          'Robux Via Send'
+        );
+        if (activeTicket) {
+          pending.category = 'Robux Via Send';
+          return showBulkConfirmation(interaction, pendingKey, pending, activeTicket);
         }
 
         pendingOrders.delete(pendingKey);
