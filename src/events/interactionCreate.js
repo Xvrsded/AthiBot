@@ -105,6 +105,13 @@ function getPendingOrderDetails(pending) {
       gamepassType: pending.gamepassType
     };
   }
+  if (pending.type === 'login') {
+    return {
+      nominal: `${pending.robuxAmount.toLocaleString('id-ID')} Robux`,
+      price: formatRupiah(pending.totalPrice),
+      robloxUsername: pending.robloxUsername
+    };
+  }
   return { nominal: 'Detail menyusul di ticket', price: 'Detail menyusul di ticket' };
 }
 
@@ -458,6 +465,50 @@ module.exports = {
         });
       }
 
+      if (customId.startsWith('login_cancel_')) {
+        pendingOrders.delete(customId.replace('login_cancel_', ''));
+        return interaction.update({
+          content: '❌ Pesanan Login dibatalkan.',
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (customId.startsWith('login_confirm_')) {
+        const pendingKey = customId.replace('login_confirm_', '');
+        const pending = pendingOrders.get(pendingKey);
+        if (!pending) {
+          return interaction.update({
+            content: '❌ Data pesanan sudah kadaluarsa. Silakan buat pesanan baru.',
+            embeds: [],
+            components: []
+          });
+        }
+
+        if (!(await ensureServiceOpen(interaction, 'login', 'Robux Via Login'))) return;
+        const activeTicket = await ticketService.findActiveTicket(
+          interaction.guild.id,
+          interaction.user.id,
+          'Robux Via Login'
+        );
+        if (activeTicket) {
+          return showBulkConfirmation(interaction, pendingKey, pending, activeTicket);
+        }
+
+        pendingOrders.delete(pendingKey);
+        await deferUpdateIfNeeded(interaction);
+        await interaction.editReply({
+          content: '✅ Pesanan Login dikonfirmasi. Ticket privat sedang dibuat...',
+          embeds: [],
+          components: []
+        });
+        return ticketService.createTicketChannel(interaction, 'Robux Via Login', {
+          robloxUsername: pending.robloxUsername,
+          robuxAmount: pending.robuxAmount,
+          totalPrice: pending.totalPrice
+        });
+      }
+
       // ----------------------------------------------------------
       // TIKET: Buat Tiket Berdasarkan Kategori (Login, Gift, Support, Report)
       // ----------------------------------------------------------
@@ -465,7 +516,7 @@ module.exports = {
         return createOrOfferBulkTicket(interaction, 'Robux Via Send');
       }
       if (customId === 'ticket_create_login') {
-        return createOrOfferBulkTicket(interaction, 'Robux Via Login');
+        return showLoginOrderModal(interaction);
       }
       if (customId === 'ticket_create_gift') {
         return createOrOfferBulkTicket(interaction, 'Gift In Game');
@@ -1027,6 +1078,61 @@ module.exports = {
           });
         }
 
+        if (customId === 'modal_login_order') {
+          const robloxUsername = interaction.fields.getTextInputValue('login_roblox_user').trim();
+          const rawRobux = interaction.fields.getTextInputValue('login_robux_amount').trim();
+          const rawPrice = interaction.fields.getTextInputValue('login_price').trim();
+          const robuxAmount = Number(rawRobux);
+          const totalPrice = Number(rawPrice.replace(/[.,\s]/g, ''));
+
+          if (
+            !robloxUsername ||
+            !Number.isInteger(robuxAmount) ||
+            robuxAmount <= 0 ||
+            !Number.isInteger(totalPrice) ||
+            totalPrice < 0
+          ) {
+            return interaction.reply({
+              content: '❌ Username, jumlah Robux, dan nominal harga harus diisi dengan angka yang valid.',
+              ephemeral: true
+            });
+          }
+
+          const pendingKey = `${interaction.user.id}_${Date.now()}`;
+          pendingOrders.set(pendingKey, {
+            type: 'login',
+            category: 'Robux Via Login',
+            userId: interaction.user.id,
+            robloxUsername,
+            robuxAmount,
+            totalPrice,
+            createdAt: Date.now()
+          });
+          setTimeout(() => pendingOrders.delete(pendingKey), 5 * 60 * 1000);
+
+          const confirmEmbed = new EmbedBuilder()
+            .setColor(embedColor)
+            .setTitle('📋 Konfirmasi Pesanan Robux Via Login')
+            .setDescription(
+              `🎮 **Username:** \`${robloxUsername}\`\n` +
+              `💎 **Jumlah Robux:** ${robuxAmount.toLocaleString('id-ID')} Robux\n` +
+              `💰 **Total Harga:** ${formatRupiah(totalPrice)}\n\n` +
+              'Setelah dikonfirmasi, ticket baru dibuat atau order ditambahkan sebagai bulk ke ticket Login yang masih aktif.'
+            )
+            .setTimestamp();
+          const confirmRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`login_confirm_${pendingKey}`)
+              .setLabel('✅ Konfirmasi Order')
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId(`login_cancel_${pendingKey}`)
+              .setLabel('❌ Batalkan')
+              .setStyle(ButtonStyle.Danger)
+          );
+          return interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+        }
+
         const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
         const giftRate = config?.giftRate ?? 95;
         const totalPrice = calculateGiftPrice(robuxAmount, giftRate);
@@ -1328,6 +1434,44 @@ function showGiftOrderModal(interaction) {
         .setPlaceholder('Masukkan username Roblox')
         .setRequired(true)
         .setMaxLength(50)
+    )
+  );
+
+  return interaction.showModal(modal);
+}
+
+function showLoginOrderModal(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId('modal_login_order')
+    .setTitle('Order Robux Via Login');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('login_roblox_user')
+        .setLabel('Username Roblox')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Masukkan username Roblox')
+        .setRequired(true)
+        .setMaxLength(50)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('login_robux_amount')
+        .setLabel('Jumlah Robux')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Contoh: 1000')
+        .setRequired(true)
+        .setMaxLength(12)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('login_price')
+        .setLabel('Total harga (angka saja)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Contoh: 157000')
+        .setRequired(true)
+        .setMaxLength(12)
     )
   );
 
