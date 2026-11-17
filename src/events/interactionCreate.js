@@ -238,7 +238,9 @@ module.exports = {
           await interaction.deferReply({ ephemeral: true });
           const result = await refreshDashboard(interaction);
           return interaction.editReply({
-            content: `✅ Dashboard dan ${result.updatedStatusChannels} channel STATUS berhasil disinkronkan.`
+            content:
+              `✅ Dashboard, ${result.updatedStatusChannels} channel STATUS, dan ` +
+              `${result.updatedOrderPanels} embed panel pricelist berhasil disinkronkan.`
           });
         }
 
@@ -1054,9 +1056,11 @@ module.exports = {
             { new: true }
           );
           if (!product) throw new Error('Paket harga tidak ditemukan.');
-          await refreshDashboard(interaction);
+          const result = await refreshDashboard(interaction);
           return interaction.reply({
-            content: `✅ Harga **${product.amount} Robux** diubah menjadi **Rp ${price.toLocaleString('id-ID')}**.`,
+            content:
+              `✅ Harga **${product.amount} Robux** diubah menjadi **Rp ${price.toLocaleString('id-ID')}**.\n` +
+              `🔄 ${result.updatedOrderPanels} embed panel pricelist ikut diperbarui.`,
             ephemeral: true
           });
         } catch (error) {

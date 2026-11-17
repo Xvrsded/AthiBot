@@ -5,9 +5,15 @@ const {
   EmbedBuilder
 } = require('discord.js');
 const GuildConfig = require('../models/GuildConfig');
+const Product = require('../models/Product');
 
 const DASHBOARD_CHANNEL_ID = '1571074377842298920';
 const STATUS_CATEGORY_ID = process.env.STATUS_CATEGORY_ID || '1570115256334950440';
+const SERVICE_CHANNELS = {
+  send: process.env.CHANNEL_ROBUX_SEND || '1570117678184661203',
+  login: process.env.CHANNEL_ROBUX_LOGIN || '1570117871823098037',
+  gift: process.env.CHANNEL_GIFT_GAME || '1570117951875584070'
+};
 const SERVICE_LABELS = {
   send: 'Robux Via Username / Send',
   login: 'Robux Via Login',
@@ -24,6 +30,94 @@ function statusLabel(isOpen) {
 
 function createButton(customId, label, style) {
   return new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style);
+}
+
+function formatProductPriceList(products, label = 'Robux') {
+  return products
+    .map((product) => `⏣ **${product.amount} ${label}** ➜ Rp ${product.price.toLocaleString('id-ID')}`)
+    .join('\n');
+}
+
+function buildPanelDescription(service, products, config) {
+  if (service === 'send') {
+    return (
+      'Selamat datang di layanan pemesanan **Robux Via Send (Username)** resmi **Athi Store**!\n' +
+      'Metode pengiriman Robux langsung masuk ke saldo akun Roblox kamu dengan cepat, aman, dan 100% legal.\n\n' +
+      '📌 **Ketentuan & Syarat Akun:**\n' +
+      '• Akun Roblox wajib sudah **berusia 18+** atau **terverifikasi identitas (KTP)**.\n' +
+      '• Wajib mengaktifkan **2-Step Verification** (Authenticator / Email) untuk kelancaran transaksi.\n' +
+      '• Robux langsung masuk instan tanpa waktu pending.\n' +
+      '• Pembelian bebas berlaku kelipatan!\n\n' +
+      '🍑 **ROBUX VIA USERNAME**\n\n' +
+      formatProductPriceList(products) +
+      '\n*(berlaku kelipatan)*\n\n' +
+      '📌 **Dibaca yaa:**\n' +
+      '• Terima robux langsung masuk tersedia untuk akun yang sudah 18+ / sudah verifikasi identitas (KTP).\n' +
+      '• Jangan lupa mengaktifkan verifikasi 2 langkah (Authenticator / 2SV).\n\n' +
+      '👇 **Klik tombol Order di bawah untuk memilih paket dan membuat pesanan!**'
+    );
+  }
+
+  if (service === 'login') {
+    return (
+      'Selamat datang di layanan **Robux Via Login (Vilog)** resmi **Athi Store**!\n' +
+      'Solusi terbaik bagi kamu yang ingin Robux super cepat tanpa ribet verifikasi akun.\n\n' +
+      '⚡ **Keunggulan & Ketentuan Layanan:**\n' +
+      '• Proses kilat **1–15 Menit** langsung masuk!\n' +
+      '• **Tanpa syarat 18+ / KTP**, semua akun Roblox baru/lama bisa order.\n' +
+      '• **No Limit**, bebas beli dalam jumlah banyak berapapun.\n' +
+      '• Keamanan akun terjamin **100% Aman & Terpercaya**.\n' +
+      '• Akun Roblox langsung di-logout oleh tim setelah proses pengisian selesai.\n\n' +
+      '💎 **Daftar Harga Vilog:**\n' +
+      formatProductPriceList(products) +
+      '\n\n⚠️ *Harap jangan memberikan password di channel umum. Klik tombol tiket di bawah untuk membuat room privat dengan staf!*'
+    );
+  }
+
+  return (
+    'Selamat datang di layanan **Gift In Game (GIG) & Gamepass** resmi **Athi Store**!\n' +
+    'Beli item game impian, Gamepass, Private Server, atau gift in-game favorit kamu dengan harga murah dan proses aman.\n\n' +
+    '🌟 **Keunggulan Layanan:**\n' +
+    '• Mendukung berbagai game Roblox populer (Blox Fruits, Pet Simulator 99, King Legacy, dll).\n' +
+    '• Pengiriman cepat via Gift Gamepass, Private Server, atau Trade In-Game.\n' +
+    '• Garansi aman, legal, dan bebas resiko.\n' +
+    '• Tim staf siap memandu langkah demi langkah hingga item berhasil kamu terima.\n\n' +
+    `💰 **Rate:** 1 Robux = Rp ${Number(config.giftRate || 0).toLocaleString('id-ID')}\n` +
+    `💡 Total harga dihitung dari jumlah Robux × Rp ${Number(config.giftRate || 0).toLocaleString('id-ID')} dan dibulatkan ke atas ke kelipatan Rp500.\n\n` +
+    '📝 **Data yang perlu diisi:**\n' +
+    '• Jumlah Robux\n• Nama atau link map\n• Jenis gamepass\n• Username Roblox\n\n' +
+    '👇 **Klik tombol di bawah ini untuk memulai pemesanan!**'
+  );
+}
+
+async function updateOrderPanelEmbeds(guild, config) {
+  const [sendProducts, loginProducts] = await Promise.all([
+    Product.find({ category: 'ROBUX VIA USERNAME', isActive: true }).sort({ sortOrder: 1, amount: 1 }).lean(),
+    Product.find({ category: 'ROBUX VILOG', isActive: true }).sort({ sortOrder: 1, amount: 1 }).lean()
+  ]);
+  const panels = [
+    { service: 'send', title: '⚡ ORDER ROBUX VIA SEND (USERNAME) — ATHI STORE', products: sendProducts },
+    { service: 'login', title: '🔐 ORDER ROBUX VIA LOGIN (VILOG) — ATHI STORE', products: loginProducts },
+    { service: 'gift', title: '🎁 ORDER GIFT IN GAME (GIG) — ATHI STORE', products: [] }
+  ];
+  let updatedCount = 0;
+
+  for (const panel of panels) {
+    const channel = await guild.channels.fetch(SERVICE_CHANNELS[panel.service]).catch(() => null);
+    if (!channel?.isTextBased()) continue;
+    const messages = await channel.messages.fetch({ limit: 50 });
+    const message = messages.find(
+      (item) => item.author.id === guild.client.user.id && item.embeds[0]?.title === panel.title
+    );
+    if (!message) continue;
+
+    const embed = EmbedBuilder.from(message.embeds[0]).setDescription(
+      buildPanelDescription(panel.service, panel.products, config)
+    );
+    await message.edit({ embeds: [embed] });
+    updatedCount++;
+  }
+  return updatedCount;
 }
 
 async function updateStatusChannels(guild, config) {
@@ -153,7 +247,8 @@ async function updateDashboard(guild, config = null) {
   resolvedConfig.storeDashboardMessageId = message.id;
   await resolvedConfig.save();
   const updatedStatusChannels = await updateStatusChannels(guild, resolvedConfig);
-  return { message, updatedStatusChannels };
+  const updatedOrderPanels = await updateOrderPanelEmbeds(guild, resolvedConfig);
+  return { message, updatedStatusChannels, updatedOrderPanels };
 }
 
 async function setServiceStatus(guildId, service, isOpen) {
@@ -184,5 +279,6 @@ module.exports = {
   getServiceStatus,
   setNumericValue,
   setServiceStatus,
-  updateDashboard
+  updateDashboard,
+  updateOrderPanelEmbeds
 };
